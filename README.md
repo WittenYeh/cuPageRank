@@ -1,2 +1,3 @@
 # cuPageRank
-Simple Implementation of Parallel PageRank with CUDA, for teaching proposes;
+
+Simple yet High-Performance Implementation of Parallel PageRank with CUDA, for teaching proposes;
