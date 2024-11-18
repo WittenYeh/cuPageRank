@@ -17,42 +17,6 @@
 typedef uint64_t EdgeT;
 typedef float ValueT;
 
-__global__ void kernel_coalesce(
-    bool* label, 
-    ValueT *delta, 
-    ValueT *residual, 
-    const uint64_t vertex_count, 
-    const uint64_t *vertexList, 
-    const EdgeT *edgeList
-) {
-    const uint64_t tid = blockDim.x * BLOCK_SIZE * blockIdx.y + blockDim.x * blockIdx.x + threadIdx.x;
-    const uint64_t warpIdx = tid >> WARP_SHIFT;
-    const uint64_t laneIdx = tid & ((1 << WARP_SHIFT) - 1);
-
-    if(warpIdx < vertex_count && label[warpIdx]) {
-        const uint64_t start = vertexList[warpIdx];
-        const uint64_t shift_start = start & MEM_ALIGN;
-        const uint64_t end = vertexList[warpIdx+1];
-
-        for(uint64_t i = shift_start + laneIdx; i < end; i += WARP_SIZE)
-            if (i >= start)
-                atomicAdd(&residual[edgeList[i]], delta[warpIdx]);
-
-        label[warpIdx] = false;
-    }
-}
-
-__global__ void update(bool *label, ValueT *delta, ValueT *residual, ValueT *value, const uint64_t vertex_count, const uint64_t *vertexList, ValueT tolerance, ValueT alpha, bool *changed) {
-    const uint64_t tid = blockDim.x * BLOCK_SIZE * blockIdx.y + blockDim.x * blockIdx.x + threadIdx.x;
-    if (tid < vertex_count && residual[tid] > tolerance) {
-        value[tid] += residual[tid];
-        delta[tid] = residual[tid] * alpha / (vertexList[tid+1] - vertexList[tid]);
-        residual[tid] = 0.0f;
-        label[tid] = true;
-        *changed = true;
-	}
-}
-
 int main(int argc, char *argv[]) {
     std::ifstream file;
     std::string vertex_file, edge_file;
@@ -191,25 +155,9 @@ int main(int argc, char *argv[]) {
 
     value_h = (ValueT*)malloc(vertex_count * sizeof(ValueT));
 
-    switch (mem) {
-        case GPUMEM:
-            checkCudaErrors(cudaMalloc((void**)&edgeList_h, edge_size));
-            file.read((char*)edgeList_h, edge_size);
-
-            break;
-        case UVM_READONLY:
-            checkCudaErrors(cudaMallocManaged((void**)&edgeList_d, edge_size));
-            file.read((char*)edgeList_d, edge_size);
-
-            checkCudaErrors(cudaMemAdvise(edgeList_d, edge_size, cudaMemAdviseSetReadMostly, device));
-            break;
-        case UVM_DIRECT:
-            checkCudaErrors(cudaMallocManaged((void**)&edgeList_d, edge_size));
-            file.read((char*)edgeList_d, edge_size);
-
-            checkCudaErrors(cudaMemAdvise(edgeList_d, edge_size, cudaMemAdviseSetAccessedBy, device));
-            break;
-    }
+    checkCudaErrors(cudaMalloc((void**)&edgeList_h, edge_size));
+    
+    file.read((char*)edgeList_h, edge_size);
 
     file.close();
 
